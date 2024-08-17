@@ -6,9 +6,32 @@ import "core:path/filepath"
 import "core:os"
 import "core:strings"
 import "core:fmt"
+import "core:sys/posix"
 
-//dir := "/opt/homebrew/Cellar/odin/2024-07/libexec/core/io"
-dir := "/opt/homebrew/Cellar/odin/2024-07/libexec/core/"
+sdk_root : string
+
+exec_and_get_stdout :: proc(cmd: string) -> string {
+    fp := posix.popen(strings.clone_to_cstring(cmd), "r")
+    if fp == nil {
+        fmt.println("Failed to start process")
+        os.exit(1)
+    }
+
+    sb := strings.builder_make()
+    output: [8192]byte
+    for posix.fgets(raw_data(output[:]), len(output), fp) != nil {
+        s := strings.trim_right_null(string(output[:]))
+        strings.write_string(&sb, s)
+    }
+
+    status := posix.pclose(fp)
+    if status == -1 {
+        fmt.println("Error reported by pclose()")
+        os.exit(1)
+    }
+
+    return strings.to_string(sb)
+}
 
 process_file :: proc(file_name: string) {
     pkg := ast.Package {
@@ -37,7 +60,7 @@ process_file :: proc(file_name: string) {
         case ^ast.Value_Decl:
             function_with_body := strings.trim(src[k.pos.offset - 1:k.end.offset - 1], "\n")
             offset := strings.index_byte(function_with_body, '\n')
-            fmt.print(strings.trim_prefix(file_name, dir), ":", k.pos.line, ":", sep="")
+            fmt.print(strings.trim_prefix(file_name, sdk_root), ":", k.pos.line, ":", sep="")
             if offset == -1 {
                 fmt.println(function_with_body)
             } else {
@@ -47,13 +70,16 @@ process_file :: proc(file_name: string) {
     }
 }
 
-cb :: proc(info: os.File_Info, in_err: os.Errno, user_data: rawptr) -> (err: os.Errno, skip_dir: bool) {
+cb :: proc(info: os.File_Info, in_err: os.Errno, user_data: rawptr) -> (err: os.Error, skip_dir: bool) {
     if !info.is_dir && strings.has_suffix(info.name, ".odin") {
         process_file(info.fullpath)
     }
-    return 0, false
+    return nil, false
 }
 
 main :: proc() {
-    filepath.walk(dir, cb, nil)
-}
+    sb := strings.builder_make()
+    strings.write_string(&sb, exec_and_get_stdout("odin root"))
+    strings.write_string(&sb, "/core")
+    sdk_root := strings.to_string(sb)
+    filepath.walk(sdk_root, cb, nil)}
