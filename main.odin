@@ -10,6 +10,8 @@ import "core:sys/posix"
 
 sdk_root : string
 
+// Inputs:
+// - args: is a list of strings with at least one element which is the process to execute. It needs to be the full path
 exec_and_get_stdout :: proc(cmd: string) -> string {
     fp := posix.popen(strings.clone_to_cstring(cmd), "r")
     if fp == nil {
@@ -18,10 +20,17 @@ exec_and_get_stdout :: proc(cmd: string) -> string {
     }
 
     sb := strings.builder_make()
-    output: [8192]byte
-    for posix.fgets(raw_data(output[:]), len(output), fp) != nil {
-        s := strings.trim_right_null(string(output[:]))
-        strings.write_string(&sb, s)
+    stdout: [dynamic]byte
+    output: [1024]byte
+    index : int
+
+    for posix.fgets(&output[0], size_of(output), fp) != nil {
+        read := bytes.index_byte(output[:], 0)
+        defer index += cast(int)read
+
+        if read > 0 {
+            assign_at(&stdout, index, ..output[:read])
+        }
     }
 
     status := posix.pclose(fp)
@@ -30,7 +39,7 @@ exec_and_get_stdout :: proc(cmd: string) -> string {
         os.exit(1)
     }
 
-    return strings.to_string(sb)
+    return strings.trim_right_null(string(stdout[:]))
 }
 
 process_file :: proc(file_name: string) {
